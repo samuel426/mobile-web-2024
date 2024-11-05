@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -30,11 +31,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -42,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView imgView;
     private TextView textView;
     private RecyclerView recyclerView; // RecyclerView 추가
-    private String site_url = "http://10.0.2.2:8000";
+    private String site_url = "https://samuel26.pythonanywhere.com/";
     private CloadImage taskDownload;
 
     private EditText editTextTitle, editTextText; // EditText 추가
@@ -60,6 +58,14 @@ public class MainActivity extends AppCompatActivity {
 
         editTextTitle = findViewById(R.id.editTextTitle);
         editTextText = findViewById(R.id.editTextText);
+
+        Button btnDelete = findViewById(R.id.btnDelete); // 삭제 버튼 초기화
+        btnDelete.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                deleteSelectedImage(); // 삭제 기능 호출
+            }
+        });
     }
 
     // 다운로드 버튼 클릭 시 이미지 다운로드 시작
@@ -98,11 +104,22 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // 선택한 이미지를 삭제
+    private void deleteSelectedImage() {
+        if (imageUri != null) {
+            imgView.setImageDrawable(null); // ImageView에서 이미지 삭제
+            imageUri = null; // 선택한 이미지 URI 초기화
+            Toast.makeText(this, "이미지가 삭제되었습니다.", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "삭제할 이미지를 선택해주세요.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     // 비동기적으로 이미지 다운로드 처리
-    private class CloadImage extends AsyncTask<String, Integer, List<Bitmap>> {
+    private class CloadImage extends AsyncTask<String, Integer, List<Post>> {
         @Override
-        protected List<Bitmap> doInBackground(String... urls) {
-            List<Bitmap> bitmapList = new ArrayList<>();
+        protected List<Post> doInBackground(String... urls) {
+            List<Post> postList = new ArrayList<>();
             try {
                 String apiUrl = urls[0];
                 String token = "641ab83796b2582d4ff26009cbad288ace518e69"; // 인증 토큰 설정
@@ -132,31 +149,35 @@ public class MainActivity extends AppCompatActivity {
                     for (int i = 0; i < aryJson.length(); i++) {
                         JSONObject post_json = aryJson.getJSONObject(i);
                         String imageUrl = post_json.getString("image");
+                        String title = post_json.getString("title");
+                        String text = post_json.getString("text");
 
+                        Bitmap imageBitmap = null;
                         if (!imageUrl.equals("")) {
                             URL myImageUrl = new URL(imageUrl);
                             conn = (HttpURLConnection) myImageUrl.openConnection();
                             InputStream imgStream = conn.getInputStream();
-                            Bitmap imageBitmap = BitmapFactory.decodeStream(imgStream);
-                            bitmapList.add(imageBitmap); // 이미지 리스트에 추가
+                            imageBitmap = BitmapFactory.decodeStream(imgStream);
                             imgStream.close();
                         }
+
+                        postList.add(new Post(title, text, imageBitmap)); // 포스트 객체 추가
                     }
                 }
             } catch (IOException | JSONException e) {
                 e.printStackTrace();
             }
-            return bitmapList;
+            return postList;
         }
 
         // UI 업데이트 (이미지 로드 결과)
         @Override
-        protected void onPostExecute(List<Bitmap> images) {
-            if (images.isEmpty()) {
+        protected void onPostExecute(List<Post> posts) {
+            if (posts.isEmpty()) {
                 textView.setText("불러올 이미지가 없습니다.");
             } else {
                 textView.setText("이미지 로드 성공!");
-                ImageAdapter adapter = new ImageAdapter(images); // RecyclerView 어댑터 설정
+                ImageAdapter adapter = new ImageAdapter(posts); // RecyclerView 어댑터 설정
                 recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
                 recyclerView.setAdapter(adapter);
             }
@@ -186,66 +207,52 @@ public class MainActivity extends AppCompatActivity {
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Authorization", "Token " + token);
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-
                 dos = new DataOutputStream(conn.getOutputStream());
 
-                // 제목 작성
+                // JSON 데이터 전송
                 dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"title\"\r\n\r\n" + title + "\r\n");
+                dos.writeBytes("Content-Disposition: form-data; name=\"title\"\r\n\r\n");
+                dos.writeBytes(title + "\r\n");
 
-                // 내용 작성
                 dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"text\"\r\n\r\n" + text + "\r\n");
+                dos.writeBytes("Content-Disposition: form-data; name=\"text\"\r\n\r\n");
+                dos.writeBytes(text + "\r\n");
 
-                // 작성자 ID 작성
                 dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"author\"\r\n\r\n" + authorId + "\r\n");
+                dos.writeBytes("Content-Disposition: form-data; name=\"author\"\r\n\r\n");
+                dos.writeBytes(String.valueOf(authorId) + "\r\n");
 
-                // 현재 시간으로 created_date 및 published_date 설정
-                String date = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(new Date());
+                // 이미지 바이트 배열 전송
                 dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"created_date\"\r\n\r\n" + date + "\r\n");
-                dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"published_date\"\r\n\r\n" + date + "\r\n");
-
-                // 이미지 파일 업로드
-                dos.writeBytes("--" + boundary + "\r\n");
-                dos.writeBytes("Content-Disposition: form-data; name=\"image\"; filename=\"upload.jpg\"\r\n");
+                dos.writeBytes("Content-Disposition: form-data; name=\"image\"; filename=\"image.jpg\"\r\n");
                 dos.writeBytes("Content-Type: image/jpeg\r\n\r\n");
 
-                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, byteArrayOutputStream);
-                byte[] imageData = byteArrayOutputStream.toByteArray();
-                dos.write(imageData);
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
+                byte[] byteArray = stream.toByteArray();
+                dos.write(byteArray);
                 dos.writeBytes("\r\n");
-
                 dos.writeBytes("--" + boundary + "--\r\n");
+
                 dos.flush();
+                dos.close();
 
                 int responseCode = conn.getResponseCode();
-                Log.d("HTTP Response Code", String.valueOf(responseCode));
                 if (responseCode == HttpURLConnection.HTTP_OK) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    InputStream is = conn.getInputStream();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(is));
                     String line;
-
                     while ((line = reader.readLine()) != null) {
                         responseMessage.append(line);
                     }
-                    reader.close();
+                    is.close();
                 } else {
-                    responseMessage.append("서버 오류: ").append(responseCode);
+                    responseMessage.append("Error: ").append(responseCode);
                 }
             } catch (IOException e) {
                 e.printStackTrace();
-                responseMessage.append("오류 발생: ").append(e.getMessage());
+                return "네트워크 오류 발생";
             } finally {
-                if (dos != null) {
-                    try {
-                        dos.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
                 if (conn != null) {
                     conn.disconnect();
                 }
@@ -255,8 +262,7 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         protected void onPostExecute(String result) {
-            Toast.makeText(getApplicationContext(), result, Toast.LENGTH_LONG).show();
+            Toast.makeText(MainActivity.this, result, Toast.LENGTH_SHORT).show();
         }
     }
-
 }
